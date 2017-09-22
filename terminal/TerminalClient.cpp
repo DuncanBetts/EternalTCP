@@ -126,14 +126,90 @@ void handleWindowChanged(winsize* win) {
   }
 }
 
+void initSetupSSH() {
+  string CLIENT_TERM(getenv("TERM"));
+  FILE *passkey_p = popen("env LC_ALL=C tr -dc \"a-zA-Z0-9\" < /dev/urandom | head -c 32", "r");
+  if (! passkey_p) {
+    cout << "cannot generate passkey!" << endl;
+    exit(1);
+  }
+  char passkey_buffer[1024];
+  fgets(passkey_buffer, sizeof(passkey_buffer), passkey_p);
+  pclose(passkey_p);
+  FLAGS_passkey = string(passkey_buffer);
+
+  FILE* id_p = popen("env LC_ALL=C tr -dc \"a-zA-Z0-9\" < /dev/urandom | head -c 16", "r");
+  if (! id_p) {
+    cout << "cannot generate id!" << endl;
+    exit(1);
+  }
+  char id_buffer[1024];
+  fgets(id_buffer, sizeof(id_buffer), id_p);
+  pclose(id_p);
+  FLAGS_id = string(id_buffer);
+  string SSH_SCRIPT {
+    "SERVER_TMP_DIR=${TMPDIR:-${TMP:-${TEMP:-/tmp}}};"
+    "TMPFILE=$(mktemp $SERVER_TMP_DIR/et-server.XXXXXXXXXXXX);"
+    "PASSKEY="+FLAGS_passkey+"; echo $PASSKEY;"
+    "ID="+FLAGS_id+"; echo $ID;"
+    "export TERM="+CLIENT_TERM+"; echo $TERM;"
+    "etserver --idpasskey=\"${ID}/${PASSKEY}\";"
+    "true"
+  };
+  /*
+  execl("/usr/bin/ssh", "/usr/bin/ssh", "devvm26048.prn1.facebook.com", (SSH_SCRIPT).c_str() ,NULL);
+  */
+  int link[2];
+  char foo[4096];
+  if (pipe(link) == -1) {
+    cout << "pipe" << endl;
+    exit(1);
+  }
+
+  pid_t pid = fork();
+
+  if (!pid){
+    dup2(link[1], 1);
+    close(link[0]);
+    close(link[1]);
+
+    execl("/usr/bin/ssh", "/usr/bin/ssh", FLAGS_host.c_str(), (SSH_SCRIPT).c_str() ,NULL);
+    cout << "execl" << endl;
+    exit(1);
+  } else if (pid < 0) {
+    cout << "Failed to fork" << endl;
+    exit(1);
+  } else {
+    close(link[1]);
+    int nbytes = read(link[0], foo, sizeof(foo));
+    wait(NULL);
+    try{
+      cout << nbytes << endl;
+      cout << foo << endl;
+      /*
+      auto idpasskey = split(string(foo), ':');
+      cout << idpasskey[0] << endl;
+      cout << idpasskey.size() <<endl;
+      */
+      cout << "etserver started" << endl;
+    } catch (const runtime_error& err){
+      cout << "Error initializing connection" << err.what() << endl;
+    }
+  }
+  return;
+}
+
 int main(int argc, char** argv) {
   gflags::SetVersionString(string(ET_VERSION));
   ParseCommandLineFlags(&argc, &argv, true);
+  FLAGS_log_dir = string(getenv("TMPDIR"));
   google::InitGoogleLogging(argv[0]);
   GOOGLE_PROTOBUF_VERIFY_VERSION;
   FLAGS_logbufsecs = 0;
   FLAGS_logbuflevel = google::GLOG_INFO;
   srand(1);
+  
+  initSetupSSH();
 
   globalClient = createClient();
   shared_ptr<UnixSocketHandler> socketHandler =
