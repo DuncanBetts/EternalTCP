@@ -65,31 +65,76 @@ void UserTerminalHandler::connectToRouter(const string &idPasskey) {
   FATAL_FAIL(writeAll(routerFd, "\0", 1));
 }
 
-void UserTerminalHandler::run() {
+void UserTerminalHandler::run(string jumpcmd) {
   int masterfd;
-
-  pid_t pid = forkpty(&masterfd, NULL, NULL, NULL);
-  switch (pid) {
-    case -1:
-      FATAL_FAIL(pid);
-    case 0: {
-      close(routerFd);
-      passwd *pwd = getpwuid(getuid());
-      chdir(pwd->pw_dir);
-      string terminal = string(::getenv("SHELL"));
-      VLOG(1) << "Child process " << pid << " launching terminal " << terminal
-              << endl;
-      setenv("ET_VERSION", ET_VERSION, 1);
-      execl(terminal.c_str(), terminal.c_str(), "--login", NULL);
-      exit(0);
-      break;
+  cout << "Ailing: in run" << jumpcmd << endl;
+  if (jumpcmd.empty()) {
+    // this is dst, open a psuedo-terminal.
+    pid_t pid = forkpty(&masterfd, NULL, NULL, NULL);
+    switch (pid) {
+      case -1:
+        FATAL_FAIL(pid);
+      case 0: {
+        close(routerFd);
+        passwd *pwd = getpwuid(getuid());
+        chdir(pwd->pw_dir);
+        string terminal = string(::getenv("SHELL"));
+        VLOG(1) << "Child process " << pid << " launching terminal " << terminal
+                << endl;
+        setenv("ET_VERSION", ET_VERSION, 1);
+        execl(terminal.c_str(), terminal.c_str(), "--login", NULL);
+        exit(0);
+        break;
+      }
+      default: {
+        // parent
+        VLOG(1) << "pty opened " << masterfd << endl;
+        runUserTerminal(masterfd, pid);
+        close(routerFd);
+        break;
+      }
     }
-    default: {
-      // parent
-      VLOG(1) << "pty opened " << masterfd << endl;
-      runUserTerminal(masterfd, pid);
-      close(routerFd);
-      break;
+  } else {
+    // this is a jumphost, start etclient with all cmd options to connect to dst.
+    int writepipe[2] = {-1, -1}, /* parent -> child */
+        readpipe[2] = {-1, -1}; /* child -> parent */
+    writepipe[0] = -1;
+
+    if (pipe(readpipe) < 0 || pipe(writepipe) < 0) {
+	    cout << "pipe" << endl;
+	    exit(1);
+    }
+    pid_t childpid = fork();
+    switch(childpid) {
+	    case -1:
+	      FATAL_FAIL(childpid);
+	    case 0: {
+		close(writepipe[1]);// parent write
+		close(readpipe[0]); //parent read
+
+		dup2(writepipe[0], 0); 
+		close(writepipe[0]);
+		dup2(readpipe[1], 1);
+		close(readpipe[1]);
+		//do child
+                try{
+                  string ETCLIENT_BINARY = "etclient";
+                  execl(ETCLIENT_BINARY.c_str(), jumpcmd.c_str(), NULL);
+                } catch (const runtime_error& err) {
+                  LOG(ERROR) << "Error setting up connection from jumphost to dst" << endl;
+                  exit(1);
+                }
+	    }
+	    default: {
+		//do parent
+		VLOG(1) << "jumphost created " << endl;
+		close(writepipe[0]); // child read
+		close(readpipe[1]); // child write
+		runJumphost(readpipe[0], writepipe[1], childpid);
+		close(readpipe[0]);
+		close(writepipe[1]);
+		break;
+	     }
     }
   }
 }
@@ -180,4 +225,65 @@ void UserTerminalHandler::runUserTerminal(int masterFd, pid_t childPid) {
   utempter_remove_record(masterFd);
 #endif
 }
+
+void UserTerminalHandler::runJumphost(int readFd, int writeFd, pid_t childPid) {
+  bool run = true;
+#define BUF_SIZE (16 * 1024)
+  char b[BUF_SIZE];
+  
+  while (run) {
+    fd_set rfd;
+    timeval tv;
+
+    FD_ZERO(&rfd);
+    FD_SET(readFd, &rfd);
+    FD_SET(routerFd, &rfd);
+    cout << "Ailing readFd " << readFd << endl;
+    cout << "Ailing routerFd " << routerFd << endl;
+    int maxfd = max(readFd, routerFd);
+    tv.tv_sec = 0;
+    tv.tv_usec = 10000;
+    select(maxfd + 1, &rfd, NULL, NULL, &tv);
+
+    cout << "maxfd " << maxfd << endl;
+    if (FD_ISSET(readFd, &rfd)) {
+      // Read from terminal and write to client
+      memset(b, 0, BUF_SIZE);
+      int rc = read(readFd, b, BUF_SIZE);
+      cout << "Ailing: rc " << rc << endl;
+      FATAL_FAIL(rc);
+      if (rc > 0) {
+        writeAll(routerFd, b, rc);
+      } else {
+  cout << "Ailing: in jump" << endl;
+        LOG(INFO) << "Terminal session ended";
+        siginfo_t childInfo;
+        FATAL_FAIL(waitid(P_PID, childPid, &childInfo, WEXITED));
+        run = false;
+        break;
+      }
+    }
+
+    try {
+      if (FD_ISSET(routerFd, &rfd)) {
+	memset(b, 0, BUF_SIZE);
+	int rc = read(routerFd, b, BUF_SIZE);
+	FATAL_FAIL(rc);
+	if (rc > 0 ) {
+	  writeAll(writeFd, b, rc);
+	} else {
+	  LOG(INFO) << "Router session ended";
+	  run = false;
+	  break;
+	}
+      }
+    } catch (std::exception ex) {
+      LOG(INFO) << ex.what();
+      run = false;
+      break;
+    }
+  }
+  cout << "Ailing: after readfd" << endl;
+}
+
 }  // namespace et

@@ -37,6 +37,9 @@ DEFINE_string(portforward, "",
               "Array of source:destination ports or "
               "srcStart-srcEnd:dstStart-dstEnd (inclusive) port ranges (e.g. "
               "10080:80,10443:443, 10090-10092:8000-8002)");
+DEFINE_string(jumphost, "",
+	      "jumphost between localhost and destination");	
+DEFINE_int32(jport, 2022, "port to connect on jumphost");
 
 shared_ptr<ClientConnection> createClient() {
   string id = FLAGS_id;
@@ -126,7 +129,11 @@ void handleWindowChanged(winsize* win) {
   }
 }
 
-void initSetupSSH() {
+void initSetupSSH(char* cmdoptions) {
+  string jump_cmd;
+  if (cmdoptions) {
+	 jump_cmd = "--jumpcmd \"" + string(cmdoptions) + "\""; 
+  }
   string CLIENT_TERM(getenv("TERM"));
   FILE *passkey_p = popen("env LC_ALL=C tr -dc \"a-zA-Z0-9\" < /dev/urandom | head -c 32", "r");
   if (! passkey_p) {
@@ -147,18 +154,17 @@ void initSetupSSH() {
   fgets(id_buffer, sizeof(id_buffer), id_p);
   pclose(id_p);
   FLAGS_id = string(id_buffer);
+  cout << "etserver --idpasskey=\"ID/PASSKEY\" "+jump_cmd+";" << endl;
   string SSH_SCRIPT {
     "SERVER_TMP_DIR=${TMPDIR:-${TMP:-${TEMP:-/tmp}}};"
     "TMPFILE=$(mktemp $SERVER_TMP_DIR/et-server.XXXXXXXXXXXX);"
     "PASSKEY="+FLAGS_passkey+"; echo $PASSKEY;"
     "ID="+FLAGS_id+"; echo $ID;"
     "export TERM="+CLIENT_TERM+"; echo $TERM;"
-    "etserver --idpasskey=\"${ID}/${PASSKEY}\";"
+    "etserver --idpasskey=\"${ID}/${PASSKEY}\" "+jump_cmd+";"
     "true"
   };
-  /*
-  execl("/usr/bin/ssh", "/usr/bin/ssh", "devvm26048.prn1.facebook.com", (SSH_SCRIPT).c_str() ,NULL);
-  */
+
   int link[2];
   char foo[4096];
   if (pipe(link) == -1) {
@@ -173,7 +179,7 @@ void initSetupSSH() {
     close(link[0]);
     close(link[1]);
 
-    execl("/usr/bin/ssh", "/usr/bin/ssh", FLAGS_host.c_str(), (SSH_SCRIPT).c_str() ,NULL);
+    execl("/usr/bin/ssh", "/usr/bin/ssh", FLAGS_jumphost.empty() ? FLAGS_host.c_str() : FLAGS_jumphost.c_str(), (SSH_SCRIPT).c_str() ,NULL);
     cout << "execl" << endl;
     exit(1);
   } else if (pid < 0) {
@@ -181,17 +187,27 @@ void initSetupSSH() {
     exit(1);
   } else {
     close(link[1]);
-    int nbytes = read(link[0], foo, sizeof(foo));
     wait(NULL);
+    int nbytes = read(link[0], foo, sizeof(foo));
     try{
       cout << nbytes << endl;
       cout << foo << endl;
-      /*
-      auto idpasskey = split(string(foo), ':');
-      cout << idpasskey[0] << endl;
-      cout << idpasskey.size() <<endl;
-      */
-      cout << "etserver started" << endl;
+      auto idpasskey = split(string(foo), ':')[1];
+      idpasskey.erase(idpasskey.find_last_not_of(" \n\r\t")+1);
+      cout << idpasskey << endl;
+      auto idpasskey_splited = split(idpasskey, '/');
+      string id = idpasskey_splited[0];
+      string passkey = idpasskey_splited[1];
+      if (id == FLAGS_id && passkey == FLAGS_passkey) {
+	      LOG(INFO) << "etserver started" << endl;
+      } else {
+	      LOG(INFO) << id << endl;
+	      LOG(INFO) << FLAGS_id << endl;
+	      LOG(INFO) << passkey << endl;
+	      LOG(INFO) << FLAGS_passkey << endl;
+	      cout << "client/server idpasskey doesn't match" << endl;
+	      exit(1);
+      }
     } catch (const runtime_error& err){
       cout << "Error initializing connection" << err.what() << endl;
     }
@@ -201,15 +217,31 @@ void initSetupSSH() {
 
 int main(int argc, char** argv) {
   gflags::SetVersionString(string(ET_VERSION));
-  ParseCommandLineFlags(&argc, &argv, true);
+  ParseCommandLineFlags(&argc, &argv, false);
   FLAGS_log_dir = string(getenv("TMPDIR"));
   google::InitGoogleLogging(argv[0]);
   GOOGLE_PROTOBUF_VERIFY_VERSION;
   FLAGS_logbufsecs = 0;
   FLAGS_logbuflevel = google::GLOG_INFO;
   srand(1);
-  
-  initSetupSSH();
+  /* If jumphost is set, we need to pass all etclient arguments to jumphost 
+  * and connect to jumphost here */
+  char *cmdoptions;
+  if (!FLAGS_jumphost.empty()) {
+	  if (FLAGS_jport == 0) {
+		  cout << "jport need to be set if a jumphost is specified!" << endl;
+		  exit(1);
+	  }
+	  //cout << *argv[3] << endl;
+	  //TODO: replace cmdoptions 
+	  for(int i=1; i<argc;i++) {
+		  cout << argv[i] << endl;
+	  }
+	  cmdoptions = "--host devvm26048.prn.facebook.com --port 8080";
+	  FLAGS_host = FLAGS_jumphost;
+	  FLAGS_port = FLAGS_jport;
+  } 
+  initSetupSSH(cmdoptions);
 
   globalClient = createClient();
   shared_ptr<UnixSocketHandler> socketHandler =

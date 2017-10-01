@@ -8,12 +8,13 @@ class UserTerminalHandler {
  public:
   UserTerminalHandler();
   void connectToRouter(const string& idPasskey);
-  void run();
+  void run(string jumpcmd);
 
  protected:
   int routerFd;
 
   void runUserTerminal(int masterFd, pid_t childPid);
+  void runJumphost(int readFd, int writeFd, pid_t childPid);
 };
 }  // namespace et
 

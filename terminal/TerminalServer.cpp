@@ -55,6 +55,7 @@ DEFINE_string(idpasskeyfile, "",
               "from a file");
 DEFINE_bool(daemon, false, "Daemonize the server");
 DEFINE_string(cfgfile, "", "Location of the config file");
+DEFINE_string(jumpcmd, "", "All arguments passed to etclient when this is a jumphost");
 
 shared_ptr<ServerConnection> globalServer;
 shared_ptr<UserTerminalRouter> terminalRouter;
@@ -331,6 +332,7 @@ void startServer() {
 }
 
 void startUserTerminal() {
+  string jumpcmd = FLAGS_jumpcmd;
   string idpasskey = FLAGS_idpasskey;
   if (FLAGS_idpasskeyfile.length() > 0) {
     // Check for passkey file
@@ -346,16 +348,17 @@ void startUserTerminal() {
   UserTerminalHandler uth;
   uth.connectToRouter(idpasskey);
   cout << "IDPASSKEY:" << idpasskey << endl;
-  if (::daemon(0, 0) == -1) {
+  if (::daemon(0,1 ) == -1) {
     LOG(FATAL) << "Error creating daemon: " << strerror(errno);
   }
+  cout << "Ailing: before connectToRouter" << endl;
   string first_idpass_chars = idpasskey.substr(0, 10);
   string std_file = string("/tmp/etserver_terminal_") + first_idpass_chars;
   stdout = fopen(std_file.c_str(), "w+");
   setvbuf(stdout, NULL, _IOLBF, BUFSIZ);  // set to line buffering
   stderr = fopen(std_file.c_str(), "w+");
   setvbuf(stderr, NULL, _IOLBF, BUFSIZ);  // set to line buffering
-  uth.run();
+  uth.run(jumpcmd);
 }
 
 int main(int argc, char** argv) {
@@ -366,6 +369,9 @@ int main(int argc, char** argv) {
   FLAGS_logbufsecs = 0;
   FLAGS_logbuflevel = google::GLOG_INFO;
   srand(1);
+  for (int i=1; i < argc; i++) {
+	  cout << argv[i] << endl;
+  }
 
   if (FLAGS_cfgfile.length()) {
     // Load the config file
