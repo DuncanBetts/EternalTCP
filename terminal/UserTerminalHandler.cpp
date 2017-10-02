@@ -111,7 +111,7 @@ void UserTerminalHandler::run(string jumpcmd) {
 	    case 0: {
 		close(writepipe[1]);// parent write
 		close(readpipe[0]); //parent read
-
+		cout << "Ailing: in child" << endl;
 		dup2(writepipe[0], 0); 
 		close(writepipe[0]);
 		dup2(readpipe[1], 1);
@@ -119,8 +119,13 @@ void UserTerminalHandler::run(string jumpcmd) {
 		//do child
                 try{
                   string ETCLIENT_BINARY = "etclient";
-                  execl(ETCLIENT_BINARY.c_str(), jumpcmd.c_str(), NULL);
+		  string terminal = string(::getenv("SHELL"));
+		  //TODO: for testing only, change this.
+		  string et_path = "/Users/ailzhang/dev/EternalTCP/build/etclient";
+		  string hackcmd = "devvm26048.prn.facebook:8080";
+                  execl(et_path.c_str(), et_path.c_str(), hackcmd.c_str(), NULL);
                 } catch (const runtime_error& err) {
+			cout << "etclient error" <<endl;
                   LOG(ERROR) << "Error setting up connection from jumphost to dst" << endl;
                   exit(1);
                 }
@@ -166,7 +171,6 @@ void UserTerminalHandler::runUserTerminal(int masterFd, pid_t childPid) {
     tv.tv_sec = 0;
     tv.tv_usec = 10000;
     select(maxfd + 1, &rfd, NULL, NULL, &tv);
-
     // Check for data to receive; the received
     // data includes also the data previously sent
     // on the same master descriptor (line 90).
@@ -174,6 +178,7 @@ void UserTerminalHandler::runUserTerminal(int masterFd, pid_t childPid) {
       // Read from terminal and write to client
       memset(b, 0, BUF_SIZE);
       int rc = read(masterFd, b, BUF_SIZE);
+      cout << "start/" << b << "/end" << endl;
       FATAL_FAIL(rc);
       if (rc > 0) {
         writeAll(routerFd, b, rc);
@@ -199,6 +204,7 @@ void UserTerminalHandler::runUserTerminal(int masterFd, pid_t childPid) {
           case TERMINAL_BUFFER: {
             TerminalBuffer tb = readProto<TerminalBuffer>(routerFd);
             const string &buffer = tb.buffer();
+	    cout << "Ailing: buffer" << &buffer << endl;
             FATAL_FAIL(writeAll(masterFd, &buffer[0], buffer.length()));
             break;
           }
@@ -230,6 +236,7 @@ void UserTerminalHandler::runJumphost(int readFd, int writeFd, pid_t childPid) {
   bool run = true;
 #define BUF_SIZE (16 * 1024)
   char b[BUF_SIZE];
+  char c[BUF_SIZE];
   
   while (run) {
     fd_set rfd;
@@ -251,7 +258,8 @@ void UserTerminalHandler::runJumphost(int readFd, int writeFd, pid_t childPid) {
       memset(b, 0, BUF_SIZE);
       int rc = read(readFd, b, BUF_SIZE);
       cout << "Ailing: rc " << rc << endl;
-      FATAL_FAIL(rc);
+      cout << "start/" << b << "/end" << endl;
+      //FATAL_FAIL(rc);
       if (rc > 0) {
         writeAll(routerFd, b, rc);
       } else {
@@ -266,11 +274,11 @@ void UserTerminalHandler::runJumphost(int readFd, int writeFd, pid_t childPid) {
 
     try {
       if (FD_ISSET(routerFd, &rfd)) {
-	memset(b, 0, BUF_SIZE);
-	int rc = read(routerFd, b, BUF_SIZE);
+	memset(c, 0, BUF_SIZE);
+	int rc = read(routerFd, c, BUF_SIZE);
 	FATAL_FAIL(rc);
 	if (rc > 0 ) {
-	  writeAll(writeFd, b, rc);
+	  writeAll(writeFd, c, rc);
 	} else {
 	  LOG(INFO) << "Router session ended";
 	  run = false;

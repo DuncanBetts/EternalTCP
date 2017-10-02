@@ -348,7 +348,7 @@ void startUserTerminal() {
   UserTerminalHandler uth;
   uth.connectToRouter(idpasskey);
   cout << "IDPASSKEY:" << idpasskey << endl;
-  if (::daemon(0,1 ) == -1) {
+  if (::daemon(0,1) == -1) {
     LOG(FATAL) << "Error creating daemon: " << strerror(errno);
   }
   cout << "Ailing: before connectToRouter" << endl;
