@@ -129,32 +129,36 @@ void handleWindowChanged(winsize* win) {
   }
 }
 
-void initSetupSSH(char* cmdoptions) {
-  string jump_cmd;
-  if (cmdoptions) {
-	 jump_cmd = "--jumpcmd \"" + string(cmdoptions) + "\""; 
-  }
+void initSetupSSH(string cmdoptions) {
+  
   string CLIENT_TERM(getenv("TERM"));
-  FILE *passkey_p = popen("env LC_ALL=C tr -dc \"a-zA-Z0-9\" < /dev/urandom | head -c 32", "r");
-  if (! passkey_p) {
-    cout << "cannot generate passkey!" << endl;
-    exit(1);
+  if (FLAGS_passkey.empty()){
+    FILE *passkey_p = popen("env LC_ALL=C tr -dc \"a-zA-Z0-9\" < /dev/urandom | head -c 32", "r");
+    if (! passkey_p) {
+      cout << "cannot generate passkey!" << endl;
+      exit(1);
+    }
+    char passkey_buffer[1024];
+    fgets(passkey_buffer, sizeof(passkey_buffer), passkey_p);
+    pclose(passkey_p);
+    FLAGS_passkey = string(passkey_buffer);
   }
-  char passkey_buffer[1024];
-  fgets(passkey_buffer, sizeof(passkey_buffer), passkey_p);
-  pclose(passkey_p);
-  FLAGS_passkey = string(passkey_buffer);
-
-  FILE* id_p = popen("env LC_ALL=C tr -dc \"a-zA-Z0-9\" < /dev/urandom | head -c 16", "r");
-  if (! id_p) {
-    cout << "cannot generate id!" << endl;
-    exit(1);
+  if (FLAGS_id.empty()){
+    FILE* id_p = popen("env LC_ALL=C tr -dc \"a-zA-Z0-9\" < /dev/urandom | head -c 16", "r");
+    if (! id_p) {
+      cout << "cannot generate id!" << endl;
+      exit(1);
+    }
+    char id_buffer[1024];
+    fgets(id_buffer, sizeof(id_buffer), id_p);
+    pclose(id_p);
+    FLAGS_id = string(id_buffer);
   }
-  char id_buffer[1024];
-  fgets(id_buffer, sizeof(id_buffer), id_p);
-  pclose(id_p);
-  FLAGS_id = string(id_buffer);
-  cout << "etserver --idpasskey=\"ID/PASSKEY\" "+jump_cmd+";" << endl;
+  string jump_cmd = "";
+  if (!cmdoptions.empty()) {
+	 jump_cmd = string("--jumpcmd \"") + cmdoptions + "\""; 
+  }
+  cout << "in client cmdoptions" << cmdoptions << endl;
   string SSH_SCRIPT {
     "SERVER_TMP_DIR=${TMPDIR:-${TMP:-${TEMP:-/tmp}}};"
     "TMPFILE=$(mktemp $SERVER_TMP_DIR/et-server.XXXXXXXXXXXX);"
@@ -191,7 +195,6 @@ void initSetupSSH(char* cmdoptions) {
     int nbytes = read(link[0], foo, sizeof(foo));
     try{
       cout << nbytes << endl;
-      cout << foo << endl;
       auto idpasskey = split(string(foo), ':')[1];
       idpasskey.erase(idpasskey.find_last_not_of(" \n\r\t")+1);
       cout << idpasskey << endl;
@@ -205,6 +208,11 @@ void initSetupSSH(char* cmdoptions) {
 	      LOG(INFO) << FLAGS_id << endl;
 	      LOG(INFO) << passkey << endl;
 	      LOG(INFO) << FLAGS_passkey << endl;
+	      cout << id << endl;
+	      cout << FLAGS_id << endl;
+	      cout << passkey << endl;
+	      cout << FLAGS_passkey << endl;
+
 	      cout << "client/server idpasskey doesn't match" << endl;
 	      exit(1);
       }
@@ -226,21 +234,24 @@ int main(int argc, char** argv) {
   srand(1);
   /* If jumphost is set, we need to pass all etclient arguments to jumphost 
   * and connect to jumphost here */
-  char *cmdoptions;
+  string cmdoptions = "";
   if (!FLAGS_jumphost.empty()) {
 	  if (FLAGS_jport == 0) {
 		  cout << "jport need to be set if a jumphost is specified!" << endl;
 		  exit(1);
 	  }
-	  //cout << *argv[3] << endl;
-	  //TODO: replace cmdoptions 
-	  for(int i=1; i<argc;i++) {
-		  cout << argv[i] << endl;
+	   
+	  cmdoptions += "--host=" + FLAGS_host + "#--port=" + to_string(FLAGS_port);
+	  if (!FLAGS_command.empty()) {
+		  cmdoptions += "#--command=" + FLAGS_command;
 	  }
-	  cmdoptions = "--host devvm26048.prn.facebook.com --port 8080";
+	  if(!FLAGS_portforward.empty()){
+		  cmdoptions += "#--portforward=" + FLAGS_portforward;
+	  }
 	  FLAGS_host = FLAGS_jumphost;
 	  FLAGS_port = FLAGS_jport;
   } 
+  cout << "client before init ssh " << endl;
   initSetupSSH(cmdoptions);
 
   globalClient = createClient();

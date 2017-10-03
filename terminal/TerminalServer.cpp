@@ -348,10 +348,10 @@ void startUserTerminal() {
   UserTerminalHandler uth;
   uth.connectToRouter(idpasskey);
   cout << "IDPASSKEY:" << idpasskey << endl;
+  //if (jumpcmd.empty() && ::daemon(0,1) == -1) {
   if (::daemon(0,1) == -1) {
     LOG(FATAL) << "Error creating daemon: " << strerror(errno);
   }
-  cout << "Ailing: before connectToRouter" << endl;
   string first_idpass_chars = idpasskey.substr(0, 10);
   string std_file = string("/tmp/etserver_terminal_") + first_idpass_chars;
   stdout = fopen(std_file.c_str(), "w+");
